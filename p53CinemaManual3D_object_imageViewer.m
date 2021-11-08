@@ -281,7 +281,7 @@ classdef p53CinemaManual3D_object_imageViewer < handle
             else
                 my_z = 0;
             end
-            if(my_z > 0)
+            if(my_z > 0 && ~obj.obj_cellTracker.isTracking)
                 tracked_z = my_z;
             else
                 tracked_z = obj.currentZ;
@@ -452,6 +452,8 @@ classdef p53CinemaManual3D_object_imageViewer < handle
             
             % Set tracked centroids patch
             [trackedCentroids, currentFrameCentroids] = obj.obj_cellTracker.centroidsTracks.getCentroids(obj.currentTimepoint);
+            tracked_Zs = obj.obj_cellTracker.centroidsTracks.getZs(obj.currentTimepoint);
+            validCentroids = tracked_Zs == obj.currentZ;
             
             maxTimepoint = obj.currentTimepoint;
             [~, maxTimepointCentroids] = obj.obj_cellTracker.centroidsTracks.getCentroids(maxTimepoint);
@@ -516,7 +518,12 @@ classdef p53CinemaManual3D_object_imageViewer < handle
             if(obj.selectedCell)
                 % Set selected cell patch
                 selectedCentroid = obj.obj_cellTracker.centroidsTracks.getCentroid(obj.currentTimepoint, obj.selectedCell);
-                set(handles.selectedCellPatch, 'XData', selectedCentroid(:,2), 'YData', selectedCentroid(:,1));
+                selectedZ = obj.obj_cellTracker.centroidsTracks.getZ(obj.currentTimepoint, obj.selectedCell);
+                if(selectedZ == obj.currentZ)
+                    set(handles.selectedCellPatch, 'XData', selectedCentroid(:,2), 'YData', selectedCentroid(:,1));
+                else
+                    set(handles.selectedCellPatch, 'XData', [], 'YData', []);
+                end
                 if(selectedCentroid(1) > 0 && get(cellTrackerHandles.hcheckboxAutoCenter, 'Value'))
                     obj.zoomRecenter(selectedCentroid);
                 end
