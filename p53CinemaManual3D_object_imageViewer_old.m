@@ -6,7 +6,7 @@
 % convenient with the method used to generate the data. From the source
 % object, derivative data organization or presentation schemes can be
 % derived that make the data convenient to interact with.
-classdef p53CinemaManual3D_object_imageViewer < handle
+classdef p53CinemaManual_object_imageViewer < handle
     properties
         gui_imageViewer;
         gui_contrast;
@@ -15,7 +15,6 @@ classdef p53CinemaManual3D_object_imageViewer < handle
         master;
         
         isMyButtonDown = false;
-        shift_ON = 0;
         
         imageOrigin;
         displaySize;
@@ -28,13 +27,10 @@ classdef p53CinemaManual3D_object_imageViewer < handle
         imageBuffer;
         currentImage;
         currentTimepoint;
-        currentZ;
-        currentChannel;
         currentFrame = 1;
         pixelRowCol;
         pixelxy;
         imageResizeFactor;
-        normalizationFactor;
         
         selectedCell;
         potentialMergeCell;
@@ -52,79 +48,75 @@ classdef p53CinemaManual3D_object_imageViewer < handle
     methods
         %% object constructor
         %
-        function obj = p53CinemaManual3D_object_imageViewer(master)
+        function obj = p53CinemaManual_object_imageViewer(master)
             obj.master = master;
             fileManagerHandles = guidata(obj.master.obj_fileManager.gui_fileManager);
-            obj.currentChannel = master.obj_fileManager.selectedChannel;
             %% get image info from first image
             %
-            IM = imread(fullfile(obj.master.obj_fileManager.rawdatapath,obj.master.obj_fileManager.database.filename{1}));
+            IM = imread(fullfile(master.obj_fileManager.rawdatapath,master.obj_fileManager.currentImageFilenames{1}));
             obj.imageResizeFactor = obj.master.obj_fileManager.imageResizeFactor;
             IM = imresize(IM, obj.imageResizeFactor);
             obj.image_width = size(IM,2);
             obj.image_height = size(IM,1);
             obj.image_widthChar = obj.image_width/master.ppChar(1);
             obj.image_heightChar = obj.image_height/master.ppChar(2);
-            obj.obj_cellTracker = p53CinemaManual3D_object_cellTracker(master);
+            obj.obj_cellTracker = p53CinemaManual_object_cellTracker(master);
             %% Preload images
             %
             
             % Read an image in the center of the sequence to determine
             % normalization factor
-            referenceImage = imresize(obj.readImage(round(obj.master.obj_fileManager.numImages), 1), obj.imageResizeFactor);
-            obj.normalizationFactor = double(quantile(referenceImage(:), 1));
+            referenceImage = imresize(obj.readImage(round(master.obj_fileManager.numImages)), obj.imageResizeFactor);
+            %referenceImage = imresize(obj.readImage(1), obj.imageResizeFactor);
+            normalizationFactor = double(quantile(referenceImage(:), 0.999));
+            normalizationFactor = double(quantile(referenceImage(:), 1));
+%             referenceImage = medfilt2(referenceImage, [2,2]);
+%             referenceImage = imbackground(referenceImage, 10, 100);
+%             normalizationFactor = double(quantile(referenceImage(:), 0.999));
             
             % Check if the preprocessing mode is 'Prediction'. If so,
             % import corresponding mat file in the prediction folder
             predictionMode = getCurrentPopupString(fileManagerHandles.hpopupPredictionMode);
-            obj.buffer_resolution = 'uint8';
-            obj.display_resolution = 8;
-            
-            obj.selectedCell = 0;
-            obj.potentialMergeCell = 0;
-            obj.currentZ = obj.master.obj_fileManager.min_z;
-            obj.currentChannel = obj.master.obj_fileManager.selectedChannel;
-            
-            if(~obj.master.obj_fileManager.preallocateMode && ~obj.master.obj_fileManager.preprocessMode)
-                return
-            end
-            
             if(strcmp(predictionMode, 'Prediction'))
                 load(fullfile('Prediction', sprintf('wellsss_s%d.mat', obj.master.obj_fileManager.selectedPosition)));
             end
-            if(strcmp(predictionMode, 'Precomputed'))
-                load(fullfile('Precomputed', sprintf('%s_s%d_centroidsLocalMaxima.mat', obj.master.obj_fileManager.selectedGroup, obj.master.obj_fileManager.selectedPosition)));
-            end
             
-            obj.master.obj_fileManager.setProgressBar(1,obj.master.obj_fileManager.numImages,'Loading status');
+            obj.buffer_resolution = 'uint8';
+            obj.display_resolution = 8;
+%             obj.buffer_resolution = 'uint16';
+%             obj.display_resolution = 16;
             
-            if(obj.master.obj_fileManager.preallocateMode)
-                obj.imageBuffer = cast(zeros(obj.image_height, obj.image_width, obj.master.obj_fileManager.numImages, obj.master.obj_fileManager.numZ), obj.buffer_resolution);
-            end
-            maxPossibleValue = 2^obj.display_resolution - 1;
-            
-            for i=1:obj.master.obj_fileManager.numImages
-                for j=obj.master.obj_fileManager.min_z:obj.master.obj_fileManager.numZ
+            if master.obj_fileManager.preallocateMode
+                master.obj_fileManager.setProgressBar(1,master.obj_fileManager.numImages,'Loading status');
+                
+                obj.imageBuffer = cast(zeros(obj.image_height, obj.image_width, master.obj_fileManager.numImages), obj.buffer_resolution);
+                maxPossibleValue = 2^obj.display_resolution - 1;
+                
+                tic
+                for i=1:master.obj_fileManager.numImages
+                    master.obj_fileManager.setProgressBar(i,master.obj_fileManager.numImages,'Loading status');
+                    % Load image
+                    OriginalImage = imresize(obj.readImage(i), obj.imageResizeFactor);
                     
-                    obj.master.obj_fileManager.setProgressBar(i,obj.master.obj_fileManager.numImages*obj.master.obj_fileManager.numZ,'Loading status');
-                    
-                    if(obj.master.obj_fileManager.preallocateMode || (obj.master.obj_fileManager.preprocessMode && ~strcmp(predictionMode, 'Precomputed')))
-                        OriginalImage = imresize(obj.readImage(i,j), obj.imageResizeFactor);
-                        
-                        if(get(fileManagerHandles.hcheckboxPrimaryBackground, 'Value'))
-                            referenceImage = imbackground(OriginalImage, 10, 100);
-                            referenceImage = double(referenceImage) / obj.normalizationFactor;
-                            referenceImage = medfilt2(referenceImage, [2,2]);
-                        end
-                        if(obj.master.obj_fileManager.preallocateMode)
-                            obj.imageBuffer(:,:,i,j) = cast(double(OriginalImage) / obj.normalizationFactor * maxPossibleValue, obj.buffer_resolution);
-                        end
+                    if(get(fileManagerHandles.hcheckboxPrimaryBackground, 'Value'))
+                        referenceImage = imbackground(OriginalImage, 10, 100);
+                        referenceImage = double(referenceImage) / normalizationFactor;
+                        referenceImage = medfilt2(referenceImage, [2,2]);
+                       
+                        %obj.imageBuffer(:,:,i) = cast(OriginalImage, obj.buffer_resolution);
+%                         obj.imageBuffer(:,:,i) = cast(imnormalize(referenceImage) * maxPossibleValue, obj.buffer_resolution);
+%                         obj.imageBuffer(:,:,i) = cast(imnormalize(OriginalImage) * maxPossibleValue, obj.buffer_resolution);
+                        obj.imageBuffer(:,:,i) = cast(double(OriginalImage) / normalizationFactor * maxPossibleValue, obj.buffer_resolution);
+                    else
+                        obj.imageBuffer(:,:,i) = cast(imnormalize(OriginalImage) * maxPossibleValue, obj.buffer_resolution);
                     end
+                    
                     % Preprocess and find local maxima
                     if(obj.master.obj_fileManager.preprocessMode)
-                        timepoint = obj.master.obj_fileManager.currentImageTimepoints(i);
-                        if(~strcmp(obj.master.obj_fileManager.maximaChannel, obj.master.obj_fileManager.selectedChannel))
-                            referenceImage = obj.readImageChannel(i,j,master.obj_fileManager.maximaChannel);
+                        timepoint = master.obj_fileManager.currentImageTimepoints(i);
+                        if(~strcmp(master.obj_fileManager.maximaChannel, master.obj_fileManager.selectedChannel))
+                            referenceImageName = master.obj_fileManager.getFilename(master.obj_fileManager.selectedPosition, master.obj_fileManager.maximaChannel, master.obj_fileManager.currentImageTimepoints(i));
+                            referenceImage = imread(fullfile(master.obj_fileManager.rawdatapath, referenceImageName));
                             referenceImage = medfilt2(referenceImage, [3,3]);
                             referenceImage = imbackground(referenceImage, 10, 100);
                             referenceImage = imresize(referenceImage, obj.imageResizeFactor);
@@ -138,18 +130,24 @@ classdef p53CinemaManual3D_object_imageViewer < handle
                                 localMaxima = getImageMaxima_Shape(referenceImage, obj.master.obj_fileManager.cellSize);
                             case 'Prediction'
                                 localMaxima = fliplr(round(wellsss{timepoint}(:,1:2))* obj.imageResizeFactor);
-                            case 'Precomputed'
-                                localMaxima = centroidsLocalMaxima{j}.getCentroids(i);
                         end
                         
-                        if(~isempty(localMaxima))
-                            obj.obj_cellTracker.centroidsLocalMaxima{j}.insertCentroids(timepoint, localMaxima);
-                        end
+                        obj.obj_cellTracker.centroidsLocalMaxima.insertCentroids(timepoint, localMaxima);
                     end
                 end
+                toc
+                
+                %Get the range of the dataset
+%                 quantileRange = quantile(double(obj.imageBuffer(:)), [0.01, 0.99]);
+%                 obj.imageBuffer = double((obj.imageBuffer - quantileRange(1))) / double(quantileRange(2)) * (2^16-1);
+%                 obj.imageBuffer = uint8(bitshift(uint16(obj.imageBuffer), -8));
+                
+                master.obj_fileManager.setProgressBar(0,master.obj_fileManager.numImages,'Loading status');
             end
+            obj.selectedCell = 0;
+            obj.potentialMergeCell = 0;
+            %obj.setFrame(1);
             
-            obj.master.obj_fileManager.setProgressBar(0,obj.master.obj_fileManager.numImages,'Loading status');
             
         end
         %% getPixelxy
@@ -272,68 +270,39 @@ classdef p53CinemaManual3D_object_imageViewer < handle
         function obj = launchImageViewer(obj)
             %% Launch the gui
             %
-            obj.gui_imageViewer = p53CinemaManual3D_gui_imageViewer(obj.master, obj.master.obj_fileManager.maxHeight);
+            obj.gui_imageViewer = p53CinemaManual_gui_imageViewer(obj.master, obj.master.obj_fileManager.maxHeight);
             obj.gui_contrast = p53CinemaManual_gui_contrast(obj.master);
             obj.gui_zoomMap = p53CinemaManual_gui_zoomMap(obj.master);
-            obj.setFrame(1, 1);
+            obj.setFrame(1);
             obj.autoContrast;
         end
         
-        function newFrame = validateFrame(obj, frame)
-            newFrame = min(max(frame,1), obj.master.obj_fileManager.numImages);
-        end
-        
-        function tracked_z = getSelectedCellZ(obj, frame)
-            frame = obj.validateFrame(frame);
-            selected_cell = obj.selectedCell;
-            if(selected_cell > 0)
-                nextTimepoint = obj.master.obj_fileManager.currentImageTimepoints(frame);
-                my_z = obj.obj_cellTracker.centroidsTracks.getZ(nextTimepoint, selected_cell);
-            else
-                my_z = 0;
-            end
-            if(my_z > 0 && ~obj.obj_cellTracker.isTracking)
-                tracked_z = my_z;
-            else
-                tracked_z = obj.currentZ;
-            end
-        end
-        
         %% Frame switching functions
-        function setFrame(obj, frame, z)
+        function setFrame(obj, frame)
             previousFrame = obj.currentFrame;
             previousTimepoint = obj.currentTimepoint;
-            previousZ = obj.currentZ;
+            previousImage = obj.currentImage;
             
-            frame = obj.validateFrame(frame);
-            z = min(max(z,obj.master.obj_fileManager.min_z), obj.master.obj_fileManager.max_z);
-                        
+            frame = min(max(frame,1), obj.master.obj_fileManager.numImages);
+            directionality = sign(frame - previousFrame);
+            
             obj.currentFrame = frame;
             obj.currentTimepoint = obj.master.obj_fileManager.currentImageTimepoints(frame);
-            obj.currentZ = z;
             
             imageViewerHandles = guidata(obj.gui_imageViewer);
-            set(imageViewerHandles.htextFrameNumber, 'String', ['Timepoint:', num2str(obj.currentTimepoint), '/', num2str(obj.master.obj_fileManager.maxTimepoint), ', Z:', num2str(obj.currentZ), '/', num2str(obj.master.obj_fileManager.numZ)]);
+            fileManagerHandles = guidata(obj.master.obj_fileManager.gui_fileManager);
             
-            sliderStep = get(imageViewerHandles.hsliderExploreStack,'SliderStep');
-            if(length(obj.master.obj_fileManager.currentImageTimepoints) > 1)
-                set(imageViewerHandles.hsliderExploreStack,'Value',sliderStep(1)*(obj.currentFrame-1));
-            end
+            set(imageViewerHandles.htextFrameNumber, 'String', ['Timepoint:', num2str(obj.currentTimepoint), '/', num2str(obj.master.obj_fileManager.maxTimepoint)]);
             
-            sliderStep = get(imageViewerHandles.hsliderExploreZ,'SliderStep');
-            if(obj.master.obj_fileManager.numZ > 1)
-                set(imageViewerHandles.hsliderExploreZ,'Value',sliderStep(1)*(obj.currentZ-1));
-            end
-            
-            if(obj.master.obj_fileManager.preallocateMode && strcmp(obj.master.obj_fileManager.selectedChannel, obj.currentChannel))
-                obj.currentImage = obj.imageBuffer(:,:,frame,z);
+            if(obj.master.obj_fileManager.preallocateMode && get(fileManagerHandles.hpopupPimaryChannel, 'Value') == get(imageViewerHandles.hpopupViewerChannel, 'Value'))
+                obj.currentImage = obj.imageBuffer(:,:,frame);
             else
                 maxPossibleValue = 2^obj.display_resolution - 1;
-                IM = obj.readImage(frame, z);
-                if(~isempty(IM))
-                    IM = imresize(IM, obj.imageResizeFactor);
-                    %IM = imnormalize_quantile(IM, 1) * maxPossibleValue;
-                    IM = double(IM) / obj.normalizationFactor * maxPossibleValue;
+                viewerChannel = getCurrentPopupString(imageViewerHandles.hpopupViewerChannel);
+                filename = obj.master.obj_fileManager.getFilename(obj.master.obj_fileManager.selectedPosition, viewerChannel, obj.currentTimepoint);
+                if(~isempty(filename))
+                    IM = imresize(imread(fullfile(obj.master.obj_fileManager.rawdatapath, filename)), obj.imageResizeFactor);
+                    IM = imnormalize_quantile(IM, 1) * maxPossibleValue;
                     if(get(imageViewerHandles.hcheckboxPreprocessFrame, 'Value'))
                         IM = medfilt2(IM, [3,3]);
                         IM = imbackground(IM, 10, 100);
@@ -342,40 +311,57 @@ classdef p53CinemaManual3D_object_imageViewer < handle
                     obj.currentImage = IM;
                 end
             end
+            %obj.updateContrastHistogram;
             
             % Predictive tracking
             if(obj.master.obj_fileManager.preprocessMode && obj.obj_cellTracker.isTracking && obj.selectedCell && ~obj.obj_cellTracker.centroidsTracks.getValue(obj.currentTimepoint, obj.selectedCell))
                 previousCentroid = obj.obj_cellTracker.centroidsTracks.getCentroid(previousTimepoint, obj.selectedCell);
-                                
-                % Check centroids that are occupied in the current frame.
-                % This is agnostic of the current z position. 
-                % TO DO: In the future, it may be a good idea to exclude centroids within
-                % the range of the current occupied centroids in all
-                % z-slices
-                [occupiedCentroids, occupied_id, occupiedZ] = obj.obj_cellTracker.centroidsTracks.getCentroids(obj.currentTimepoint);
-                subset_occupied_centroids = occupied_id ~= obj.selectedCell;
-                occupiedCentroids = occupiedCentroids(subset_occupied_centroids,:);
-                occupiedZ = occupiedZ(subset_occupied_centroids);
                 
-                referenceTimepoint = previousTimepoint;               
-                referenceCentroid = obj.obj_cellTracker.centroidsTracks.getCentroid(referenceTimepoint, obj.selectedCell);
-                [predictedCentroids, ~, distance] = obj.obj_cellTracker.centroidsLocalMaxima{obj.currentZ}.getCentroidsInRange(obj.currentTimepoint, referenceCentroid, obj.obj_cellTracker.getDistanceRadius);
-                if(~isempty(predictedCentroids))
-                    if(~isempty(occupiedCentroids))
+                d1 = Inf; d2 = Inf;
+                
+                [occupiedCentroids, occupied_id] = obj.obj_cellTracker.centroidsTracks.getCentroids(obj.currentTimepoint);
+                occupiedCentroids = occupiedCentroids(occupied_id ~= obj.selectedCell,:);
+                if(obj.currentFrame > 1)
+                    referenceTimepoint = obj.master.obj_fileManager.currentImageTimepoints(frame-1);
+                    referenceCentroid = obj.obj_cellTracker.centroidsTracks.getCentroid(referenceTimepoint, obj.selectedCell);
+                    [predictedCentroids, ~, distance] = obj.obj_cellTracker.centroidsLocalMaxima.getCentroidsInRange(obj.currentTimepoint, referenceCentroid, obj.obj_cellTracker.getDistanceRadius);
+                    if(~isempty(predictedCentroids) && ~isempty(occupiedCentroids))
                         notOccupied = ~ismember(predictedCentroids, occupiedCentroids, 'rows');
-                        predictedCentroids = predictedCentroids(notOccupied,:);
-                        distance = distance(notOccupied);
+                        predictedCentroids = predictedCentroids(notOccupied,:); distance = distance(notOccupied);
                     end
-                    closestCentroidIndex = find(distance == min(distance), 1, 'first');
-                    prediction1 = predictedCentroids(closestCentroidIndex,:);
-                    d1 = distance(closestCentroidIndex);
-                    obj.obj_cellTracker.centroidsTracks.setCentroid(obj.currentTimepoint, obj.selectedCell, prediction1, 0, obj.currentZ);
+                    if(~isempty(predictedCentroids))
+                        closestCentroidIndex = find(distance == min(distance), 1, 'first');
+                        prediction1 = predictedCentroids(closestCentroidIndex,:);
+                        d1 = distance(closestCentroidIndex);
+                    end
+                end
+                if(obj.currentFrame < length(obj.master.obj_fileManager.currentImageTimepoints))
+                    referenceTimepoint = obj.master.obj_fileManager.currentImageTimepoints(frame+1);
+                    referenceCentroid = obj.obj_cellTracker.centroidsTracks.getCentroid(referenceTimepoint, obj.selectedCell);
+                    [predictedCentroids, ~, distance] = obj.obj_cellTracker.centroidsLocalMaxima.getCentroidsInRange(obj.currentTimepoint, referenceCentroid, obj.obj_cellTracker.getDistanceRadius);
+                    if(~isempty(predictedCentroids) && ~isempty(occupiedCentroids))
+                        notOccupied = ~ismember(predictedCentroids, occupiedCentroids, 'rows');
+                        predictedCentroids = predictedCentroids(notOccupied,:); distance = distance(notOccupied);
+                    end
+                    if(~isempty(predictedCentroids))
+                        closestCentroidIndex = find(distance == min(distance), 1, 'first');
+                        prediction2 = predictedCentroids(closestCentroidIndex,:);
+                        d2 = distance(closestCentroidIndex);
+                    end
+                end
+                if(~isinf(d1) || ~isinf(d2))
+                    if(d1 < d2)
+                        obj.obj_cellTracker.centroidsTracks.setCentroid(obj.currentTimepoint, obj.selectedCell, prediction1, 0);
+                    else
+                        obj.obj_cellTracker.centroidsTracks.setCentroid(obj.currentTimepoint, obj.selectedCell, prediction2, 0);
+                    end
                 end
             end
-            
+            handles = guidata(obj.gui_imageViewer);
             handlesZoomMap = guidata(obj.gui_zoomMap);
+            cellTrackerHandles = guidata(obj.obj_cellTracker.gui_cellTracker);
 
-            set(imageViewerHandles.sourceImage,'CData',obj.currentImage);
+            set(handles.sourceImage,'CData',obj.currentImage);
             set(handlesZoomMap.sourceImage,'CData',obj.currentImage);
 
             obj.setImage;
@@ -383,26 +369,12 @@ classdef p53CinemaManual3D_object_imageViewer < handle
         end
         
         function nextFrame(obj)
-            newFrame = obj.validateFrame(obj.currentFrame + 1);
-            newZ = obj.getSelectedCellZ(newFrame);
-            obj.setFrame(newFrame, newZ);
+            obj.setFrame(obj.currentFrame + 1);
             obj.setImage;
         end
         
         function previousFrame(obj)
-            newFrame = obj.validateFrame(obj.currentFrame - 1);
-            newZ = obj.getSelectedCellZ(newFrame);
-            obj.setFrame(newFrame, newZ);
-            obj.setImage;
-        end
-        
-        function nextZ(obj)
-            obj.setFrame(obj.currentFrame, obj.currentZ + 1);
-            obj.setImage;
-        end
-        
-        function previousZ(obj)
-            obj.setFrame(obj.currentFrame, obj.currentZ - 1);
+            obj.setFrame(obj.currentFrame - 1);
             obj.setImage;
         end
         
@@ -414,6 +386,7 @@ classdef p53CinemaManual3D_object_imageViewer < handle
             obj.obj_cellTracker.deleteCellData(obj.selectedCell);
             obj.setSelectedCell(0);
             obj.obj_cellTracker.setAvailableCells;
+            %obj.obj_cellTracker.stopTracking;
             obj.obj_cellTracker.firstClick = 1;
             obj.setImage;
         end
@@ -429,32 +402,42 @@ classdef p53CinemaManual3D_object_imageViewer < handle
         end
        
         %% Image manipulation
-        function IM = readImage(obj, frame, z)
-            IM = obj.readImageChannel(frame, z, obj.master.obj_fileManager.selectedChannel);
-        end
-        
-        function IM = readImageChannel(obj, frame, z, channel_name)
-            fileManager = obj.master.obj_fileManager;
-            timepoint = fileManager.currentImageTimepoints(frame);
-            [targetFile, z_index] = fileManager.getFilename(fileManager.selectedPosition, channel_name, timepoint, z);
-            fname = fullfile(fileManager.rawdatapath,targetFile);
-            IM = imread(fname, z_index);
+        function IM = readImage(obj, index)
+            fname = fullfile(obj.master.obj_fileManager.rawdatapath,obj.master.obj_fileManager.currentImageFilenames{index});
+            IM = imread(fname);
+            %IM = uint8(bitshift(IM, -4));
         end
         
         function setImage(obj)
-            pause(0.001);
             handles = guidata(obj.gui_imageViewer);
+            %handlesZoomMap = guidata(obj.gui_zoomMap);
             cellTrackerHandles = guidata(obj.obj_cellTracker.gui_cellTracker);
-
+            
+            if(~isempty(handles.hsliderExploreStack))
+                sliderStep = get(handles.hsliderExploreStack,'SliderStep');
+                set(handles.hsliderExploreStack,'Value',sliderStep(1)*(obj.currentFrame-1));
+            end
             set(handles.currentCellTrace, 'xdata', [], 'ydata', []);
             
             % Set tracked centroids patch
             [trackedCentroids, currentFrameCentroids] = obj.obj_cellTracker.centroidsTracks.getCentroids(obj.currentTimepoint);
-            tracked_Zs = obj.obj_cellTracker.centroidsTracks.getZs(obj.currentTimepoint);
-            validCentroids = tracked_Zs == obj.currentZ;
             
             maxTimepoint = obj.currentTimepoint;
             [~, maxTimepointCentroids] = obj.obj_cellTracker.centroidsTracks.getCentroids(maxTimepoint);
+            
+%             if(obj.currentTimepoint == max(obj.master.obj_fileManager.currentImageTimepoints))
+%                 maxTimepoint = 96;
+%                 [~, excludedCentroids] = obj.obj_cellTracker.centroidsTracks.getCentroids(240);
+%                 
+%                 maxTimepointCentroids = maxTimepointCentroids(~ismember(maxTimepointCentroids, excludedCentroids));
+%                 
+%                 cellDivided = zeros(length(maxTimepointCentroids),1);
+%                 for i=1:length(maxTimepointCentroids)
+%                     divisionTrack = obj.obj_cellTracker.centroidsDivisions.getCellTrack(maxTimepointCentroids(i));
+%                     cellDivided(i) = sum(divisionTrack(:,1) > 0);
+%                 end
+%                 maxTimepointCentroids = intersect(maxTimepointCentroids, maxTimepointCentroids(logical(cellDivided)));
+%             end
             set(handles.trackedCellsPatch, 'XData', trackedCentroids(ismember(currentFrameCentroids, maxTimepointCentroids),2), 'YData', trackedCentroids(ismember(currentFrameCentroids, maxTimepointCentroids),1));
                                    
             % Set the completed centroids patch
@@ -467,11 +450,10 @@ classdef p53CinemaManual3D_object_imageViewer < handle
                 lookupRadius = obj.obj_cellTracker.getDistanceRadius;
                 currentPoint = obj.pixelxy;
                 if(~isempty(currentPoint))
-                    highlightedCentroids = obj.obj_cellTracker.centroidsLocalMaxima{obj.currentZ}.getCentroidsInRange(obj.currentTimepoint, fliplr(currentPoint), lookupRadius);
-                    if(~isempty(highlightedCentroids))
-                        set(handles.cellsInRangePatch, 'XData', highlightedCentroids(:,2), 'YData', highlightedCentroids(:,1));
-                    end
-                    closestCentroid = obj.obj_cellTracker.centroidsLocalMaxima{obj.currentZ}.getClosestCentroid(obj.currentTimepoint, fliplr(currentPoint), lookupRadius);
+                    highlightedCentroids = obj.obj_cellTracker.centroidsLocalMaxima.getCentroidsInRange(obj.currentTimepoint, fliplr(currentPoint), lookupRadius);
+                    set(handles.cellsInRangePatch, 'XData', highlightedCentroids(:,2), 'YData', highlightedCentroids(:,1));
+                    
+                    closestCentroid = obj.obj_cellTracker.centroidsLocalMaxima.getClosestCentroid(obj.currentTimepoint, fliplr(currentPoint), lookupRadius);
                     set(handles.closestCellPatch, 'XData', closestCentroid(:,2), 'YData', closestCentroid(:,1));
                 end
             end
@@ -517,12 +499,7 @@ classdef p53CinemaManual3D_object_imageViewer < handle
             if(obj.selectedCell)
                 % Set selected cell patch
                 selectedCentroid = obj.obj_cellTracker.centroidsTracks.getCentroid(obj.currentTimepoint, obj.selectedCell);
-                selectedZ = obj.obj_cellTracker.centroidsTracks.getZ(obj.currentTimepoint, obj.selectedCell);
-                if(selectedZ == obj.currentZ)
-                    set(handles.selectedCellPatch, 'XData', selectedCentroid(:,2), 'YData', selectedCentroid(:,1));
-                else
-                    set(handles.selectedCellPatch, 'XData', [], 'YData', []);
-                end
+                set(handles.selectedCellPatch, 'XData', selectedCentroid(:,2), 'YData', selectedCentroid(:,1));
                 if(selectedCentroid(1) > 0 && get(cellTrackerHandles.hcheckboxAutoCenter, 'Value'))
                     obj.zoomRecenter(selectedCentroid);
                 end

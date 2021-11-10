@@ -1,6 +1,6 @@
 %%
 %
-function [] = p53CinemaManual_method_cellTracker_triggerTracking(obj_cellT,altEvent)
+function [] = p53CinemaManual3D_method_cellTracker_triggerTracking(obj_cellT,altEvent)
 %% debug mode
 % Shows the x and y of the location of the mouse within the imageViewer
 % axes
@@ -23,6 +23,7 @@ end
 %
 currentRowCol = obj_cellT.master.obj_imageViewer.getPixelRowCol;
 currentTimepoint = obj_cellT.master.obj_imageViewer.currentTimepoint;
+currentZ = obj_cellT.master.obj_imageViewer.currentZ;
 if(isempty(currentRowCol))
     return;
 end
@@ -32,7 +33,7 @@ if(obj_cellT.master.obj_fileManager.preprocessMode)
     lookupRadius = obj_cellT.getDistanceRadius;
     [queryCentroid,d] = obj_cellT.centroidsTracks.getClosestCentroid(currentTimepoint, currentRowCol, 1);
     if(isempty(d))
-        queryCentroid = obj_cellT.centroidsLocalMaxima.getClosestCentroid(currentTimepoint, currentRowCol, lookupRadius);
+        queryCentroid = obj_cellT.centroidsLocalMaxima{currentZ}.getClosestCentroid(currentTimepoint, currentRowCol, lookupRadius);
     end
         
 else
@@ -63,8 +64,8 @@ end
 %% Set the centroids in selected cell and time
 if(strcmp(altEvent, 'alt')) % Override predictions if user used left click
     queryCentroid = currentRowCol;
-    newLocalMaxima = obj_cellT.centroidsLocalMaxima.getAvailableCellId;
-    obj_cellT.centroidsLocalMaxima.setCentroid(currentTimepoint, newLocalMaxima, queryCentroid, 0);
+    newLocalMaxima = obj_cellT.centroidsLocalMaxima{currentZ}.getAvailableCellId;
+    obj_cellT.centroidsLocalMaxima{currentZ}.setCentroid(currentTimepoint, newLocalMaxima, queryCentroid, 0);
 end
 selectedCell = obj_cellT.master.obj_imageViewer.selectedCell;
 obj_cellT.centroidsTracks.setCentroid(currentTimepoint, selectedCell, queryCentroid, 1, obj_cellT.master.obj_imageViewer.currentZ);
@@ -110,7 +111,7 @@ if(length(frameOrdering) > 1)
         previousCentroid = obj_cellT.centroidsTracks.getCentroid(previousTimepoint, selectedCell);
         currentCentroid = obj_cellT.centroidsTracks.getCentroid(currentTimepoint, selectedCell);
         if(currentCentroid(1) == 0)
-            [predictedCentroids, ~, distance] = obj_cellT.centroidsLocalMaxima.getCentroidsInRange(currentTimepoint, previousCentroid, lookupRadius);
+            [predictedCentroids, ~, distance] = obj_cellT.centroidsLocalMaxima{currentZ}.getCentroidsInRange(currentTimepoint, previousCentroid, lookupRadius);
             if(isempty(predictedCentroids))
                 break
             end
@@ -122,7 +123,7 @@ if(length(frameOrdering) > 1)
             elseif(~isempty(distance))
                 [sortedDistance, ordering] = sort(distance);
                 if(diff(sortedDistance(1:2)) > lookupRadius / 2)
-                    reciprocalCentroid = obj_cellT.centroidsLocalMaxima.getClosestCentroid(previousTimepoint, predictedCentroids(ordering(1),:), lookupRadius);
+                    reciprocalCentroid = obj_cellT.centroidsLocalMaxima{currentZ}.getClosestCentroid(previousTimepoint, predictedCentroids(ordering(1),:), lookupRadius);
                     if(sum(reciprocalCentroid == currentCentroid) == 2)
                         obj_cellT.centroidsTracks.setCentroid(currentTimepoint, selectedCell, predictedCentroids(ordering(1),:), 0);
                     end

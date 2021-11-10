@@ -37,14 +37,16 @@ classdef CentroidTimeseries3D_withAnnotations < handle
             obj.singleCells(time).point(1:(size(centroids,1)),:) = centroids;
         end
         
-        function centroid = getCentroid(obj, time, cell_id)
+        function [centroid, z] = getCentroid(obj, time, cell_id)
             centroid = obj.singleCells(time).point(cell_id,:);
+            z = obj.getZ(time, cell_id);
         end
         
         % Get all non-zero centroids
-        function [centroid, valid_cells] = getCentroids(obj, time)
+        function [centroid, valid_cells, z] = getCentroids(obj, time)
             valid_cells = find(obj.singleCells(time).point(:,1) >0);
             centroid = obj.singleCells(time).point(valid_cells,:);
+            z = obj.getZs(time);
         end
         
         % Get all values for existing cells in a frame

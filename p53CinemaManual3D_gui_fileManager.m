@@ -177,7 +177,7 @@ hpopupPredictionMode = uicontrol('Style','popupmenu','Units','characters',...
     'FontSize',10,'FontName','Arial','HorizontalAlignment','right',...
     'String','Prediction mode','Position',[hx + hmargin + 1.75*hwidth, hy, hwidth, hheight],...
     'Enable', 'off', 'parent',f);
-set(hpopupPredictionMode, 'String', {'Intensity', 'Shape', 'Prediction'});
+set(hpopupPredictionMode, 'String', {'Intensity', 'Shape', 'Prediction', 'Precomputed'});
 set(hpopupPredictionMode, 'Value', 1);
 
 
@@ -289,14 +289,14 @@ set(f,'Visible','on');
     end
 
     function checkboxPreallocate_Callback(~,~)
-        if(~get(hcheckboxPreallocate, 'Value'))
-            set(hcheckboxPreprocess, 'Value', 0);
-        end
+%         if(~get(hcheckboxPreallocate, 'Value'))
+%             set(hcheckboxPreprocess, 'Value', 0);
+%         end
     end
 
     function checkboxPreprocess_Callback(~,~)
         if(get(hcheckboxPreprocess, 'Value'))
-            set(hcheckboxPreallocate, 'Value', 1);
+            %set(hcheckboxPreallocate, 'Value', 1);
             set(hpopupPredictionMode, 'Enable', 'on');
         end
     end
